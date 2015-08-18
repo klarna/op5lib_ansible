@@ -1,0 +1,106 @@
+#!/usr/bin/python -tt
+
+import time
+
+from op5 import OP5
+
+import logging
+logger = logging.getLogger("op5")
+logger.setLevel(logging.DEBUG)
+
+fh = logging.FileHandler("/tmp/op5lib_ansible.log")
+fh.setLevel(logging.INFO)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)s - %(funcName)10s() ] %(message)s')
+fh.setFormatter(formatter)
+
+logger.addHandler(fh)
+
+def main():
+    module = AnsibleModule(
+        argument_spec = dict(
+            state = dict(type='str', default='present', choices=['present', 'absent']),
+            url = dict(type='str', required=False, default='https://monitor.int.klarna.net/api'),
+            username = dict(type='str', required=True),
+            password = dict(type='str', required=True),
+
+            commit = dict(type='bool', required=False),
+            object_type = dict(type='str', required=False),
+            object_name = dict(type='str', required=False),
+
+            host_name = dict(type='str', required=False),
+            service_description = dict(type='str', required=False),
+
+            hostgroups = dict(type='list', required=False),
+            check_command = dict(type='str', required=False),
+            check_command_args = dict(type='str', required=False),
+            template = dict(type='str', required=False),
+            contact_groups = dict(type='list', required=False),
+            freshness_threshold = dict(type='int', required=False),
+            file_id = dict(type='str', required=False),
+            check_period = dict(type='str', required=False),
+            max_check_attempts = dict(type='int', required=False),
+            check_interval = dict(type='int', required=False),
+            notification_interval = dict(type='int', required=False),
+            notification_options = dict(type='list', required=False),
+            notification_period = dict(type='str', required=False),
+            retry_interval = dict(type='int', required=False),
+            servicegroups = dict(type='list', required=False)
+        ),
+        mutually_exclusive=[
+            ['commit', 'object_type'],
+        ],
+        required_one_of = [
+            ['commit', 'object_type'],
+        ],
+        required_together=[
+            ['object_type', 'object_name'],
+        ],
+        supports_check_mode = True
+    )
+
+    if not module.params['service_description']:
+        module.params['service_description'] = module.params['check_command_args']
+
+    url = module.params['url']
+    username = module.params['username']
+    password = module.params['password']
+
+    DELAY = 2 #a delay of 2 seconds between calls for safety, one could still hit the safety precautions though!
+
+    commit = module.params['commit']
+    object_type = module.params['object_type']
+    object_name = module.params['object_name']
+
+    op5 = OP5(url, username, password, dryrun=module.check_mode, debug=False, logtofile=True, interactive=False)
+
+    changed = False
+    failed = False
+    msg = "Success"
+
+    if commit:
+        if op5.commit_changes(True):
+            changed = True
+        msg = op5.data
+    else:
+        if module.params['state'] == "present":
+            data = {}
+            for key in module.params.keys():
+                if key not in ('object_name', 'object_type', 'state', 'url', 'username', 'password') and module.params[key] not in [None, ""]:
+                    data[key] = module.params[key]
+
+            op5.sync(object_type, object_name, data)
+        else:
+            op5.delete(object_type, object_name)
+
+        changed = op5.modified
+        if op5.status_code not in [200, 201]:
+            failed = True
+            msg = op5.data
+
+    time.sleep(DELAY)
+    module.exit_json(changed=changed, failed=failed, msg=msg)
+    #INFO: run ansible-playbook with one '-v' flag to see the content of the msg variable
+
+# import module snippets
+from ansible.module_utils.basic import *
+main()
